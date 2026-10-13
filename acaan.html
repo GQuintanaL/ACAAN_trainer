@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Entrenador ACAAN - by Willy</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:16px;background:#f6f7fb;color:#111}
+  .card{background:white;padding:16px;border-radius:10px;box-shadow:0 6px 18px rgba(30,30,60,0.08);max-width:900px;margin:10px auto}
+  h1{margin:0 0 8px;font-size:22px}
+  .big{font-size:48px;margin:8px 0}
+  .muted{color:#666;font-size:13px}
+  button{padding:8px 12px;border-radius:8px;border:0;background:#0b79ff;color:white;cursor:pointer}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
+  textarea{width:100%;height:120px;font-family:monospace;padding:8px;border-radius:6px}
+  .stack-list{max-height:240px;overflow:auto;border:1px solid #eee;padding:8px;border-radius:8px;background:#fff}
+  .danger{color:#b00020}
+  .small{font-size:13px}
+  .stack-row{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+  .show-stack{background:#e9eefc;color:#0b4ccf;padding:6px 8px;border-radius:6px;border:0;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Entrenador ACAAN - by Willy</h1>
+    <p class="muted">Genera una carta y un número, y te indica qué carta debe quedar en bottom para que funcione el ACAAN, según distintos stacks.</p>
+    <p class="muted">Se pueden añadir más stacks en la parte inferior.</p>
+    <hr/>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div>
+        <div class="muted">Carta objetivo</div>
+        <div id="targetCard" class="big">—</div>
+      </div>
+
+      <div>
+        <div class="muted">Número</div>
+        <div id="targetNumber" class="big">—</div>
+      </div>
+
+      <div style="margin-left:auto">
+        <button id="btnGenerate">Generar ACAAN</button>
+      </div>
+    </div>
+
+    <hr/>
+
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:280px">
+        <div class="muted">Stacks disponibles</div>
+        <div class="stack-list" id="stacksCheckboxes"></div>
+      </div>
+
+      <div style="flex:1.1;min-width:520px">
+        <div class="muted">Resultados</div>
+        <table id="resultsTable">
+          <thead>
+            <tr><th>Stack</th><th>Carta en bottom</th><th>Notas</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <hr/>
+    <div>
+      <h3>Añadir nuevo stack</h3>
+      <label>Nombre del stack</label>
+      <input id="newStackName" placeholder="Ej. Mnemonica personalizado" style="width:100%;padding:8px;border-radius:6px;border:1px solid #ddd">
+      <label style="margin-top:6px">Lista de 52 cartas</label>
+      <textarea id="newStackList" placeholder="Ej: AP,2P,3P,... (usa P,C,D,T)"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="btnAddStack">Añadir stack</button>
+        <button id="btnClearCustom">Borrar</button>
+      </div>
+      <div id="stackMessage" class="muted small" style="margin-top:8px"></div>
+    </div>
+
+  </div>
+
+<script>
+const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+const SUITS = ["P","C","D","T"];
+
+function codeToDisplay(code){
+  code = (""+code).trim().toUpperCase();
+  if(!code) return "?";
+  const suit = code.slice(-1);
+  const rank = code.slice(0,-1);
+  const suitSym = suit==="P"?"♠":suit==="C"?"♥":suit==="D"?"♦":suit==="T"?"♣":"?";
+  return `${rank}${suitSym}`;
+}
+
+function normalizeCode(code){
+  if(!code) return null;
+  code = (""+code).trim().toUpperCase();
+  code = code.replace(/[♠♣♥♦]/g, m=>{
+    return m==="♠"?"P":m==="♥"?"C":m==="♦"?"D":"T";
+  });
+  code = code.replace(/\s+/g,"");
+  const m = code.match(/^([0-9]+|[AJQK]|10)([PCDT])$/);
+  if(!m) return null;
+  const rank = m[1].toUpperCase();
+  const suit = m[2].toUpperCase();
+  if(RANKS.indexOf(rank)===-1) return null;
+  return rank+suit;
+}
+
+function fullDeckSorted(){
+  const deck=[];
+  for(const s of SUITS) for(const r of RANKS) deck.push(r+s);
+  return deck;
+}
+
+// Stacks incorporados
+const STACK_ORDERED = { name:"Baraja ordenada (P,C,D,T)", list:fullDeckSorted() };
+
+const STACK_STEBBINS = { 
+  name:"Si Stebbins TreCoPiDia", 
+  list:(()=>{ const deck=[]; let current=0; const suits=["T","C","P","D"]; for(let i=0;i<52;i++){deck.push(RANKS[current]+suits[i%4]); current=(current+3)%13;} return deck; })(), 
+  notes:"" 
+};
+
+const STACK_TAMARIZ = {
+  name:"Mnemónica Tamariz",
+  list:"4T,2C,7D,3T,4C,6D,AP,5C,9P,2P,QC,3D,QT,8C,6P,5P,9C,KT,2D,JC,3P,8P,6C,10T,5D,KD,2T,3C,8D,5T,KP,JD,8T,10P,KC,JT,7P,10C,AD,4P,7C,4D,AT,9T,JP,QD,7T,QP,10D,6T,AC,9D".split(","),
+  notes:""
+};
+
+const STACK_WOODY = {
+  name:"Woody Aragón",
+  list:"JP,7T,10C,AD,4T,7C,4D,AP,4C,7D,4P,AC,10D,7P,JT,KD,10P,8T,JC,AT,KP,5T,8C,3D,QP,KC,9T,QC,6T,9C,2D,3T,6C,5D,2P,3C,8D,5P,KT,JD,8P,10T,2T,5C,6D,3P,2C,9D,6P,QT,QD,9P".split(","),
+  notes:""
+};
+
+const stacks = [STACK_ORDERED, STACK_STEBBINS, STACK_TAMARIZ, STACK_WOODY];
+
+let currentTarget = {card:null, number:null};
+
+function randomCardAndNumber(){
+  const deck=[];
+  for(const s of SUITS) for(const r of RANKS) deck.push(r+s);
+  const card=deck[Math.floor(Math.random()*deck.length)];
+  const number=Math.floor(Math.random()*52)+1;
+  return {card,number};
+}
+
+// Offset +1
+function cartaBottomPara(stack, carta, numero){
+  const norm=normalizeCode(carta);
+  const idx=stack.findIndex(x=>x===norm);
+  if(idx===-1) return {error:"Carta no encontrada"};
+  const posBottom=((idx-(numero)+52)%52); // offset +1 implementado
+  //const posBottom = ((idx - (numero - 1) + 1 + 52) % 52);
+  return {bottom:stack[posBottom], bottomIndex:posBottom, targetIndex:idx};
+}
+
+/* UI */
+const elTargetCard=document.getElementById("targetCard");
+const elTargetNumber=document.getElementById("targetNumber");
+const btnGenerate=document.getElementById("btnGenerate");
+const resultsTableBody=document.querySelector("#resultsTable tbody");
+const stacksCheckboxes=document.getElementById("stacksCheckboxes");
+const btnAddStack=document.getElementById("btnAddStack");
+const newStackList=document.getElementById("newStackList");
+const newStackName=document.getElementById("newStackName");
+const stackMessage=document.getElementById("stackMessage");
+const btnClearCustom=document.getElementById("btnClearCustom");
+
+function renderStacksCheckboxes(){
+  stacksCheckboxes.innerHTML="";
+  stacks.forEach((s,i)=>{
+    const row=document.createElement("div");
+    row.className="stack-row";
+    row.innerHTML=`<input type="checkbox" id="stackchk${i}" data-idx="${i}" checked>
+                   <label for="stackchk${i}" style="margin:0">${s.name}</label>
+                   <button class="show-stack" data-idx="${i}" style="margin-left:auto">Ver orden</button>`;
+    stacksCheckboxes.appendChild(row);
+  });
+  stacksCheckboxes.querySelectorAll(".show-stack").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const idx=+btn.getAttribute("data-idx");
+      const s=stacks[idx];
+      if(!s) return;
+      alert(`Stack: ${s.name}\n\n${s.list.map(codeToDisplay).join(", ")}`);
+    });
+  });
+}
+
+function selectedStackIndices(){
+  const checks=stacksCheckboxes.querySelectorAll("input[type=checkbox]");
+  const arr=[];
+  checks.forEach(cb=>{ if(cb.checked) arr.push(+cb.getAttribute("data-idx")); });
+  return arr;
+}
+
+function displayTarget(card,number){
+  elTargetCard.textContent=codeToDisplay(card);
+  elTargetNumber.textContent=number;
+}
+
+function computeAll(){
+  resultsTableBody.innerHTML="";
+  const sel=selectedStackIndices();
+  if(sel.length===0){
+    resultsTableBody.innerHTML=`<tr><td colspan="3" class="muted">Selecciona al menos un stack.</td></tr>`;
+    return;
+  }
+  sel.forEach(idx=>{
+    const s=stacks[idx];
+    const row=document.createElement("tr");
+    const tdName=document.createElement("td");
+    const tdBottom=document.createElement("td");
+    const tdNotes=document.createElement("td");
+    tdName.textContent=s.name;
+
+    const res=cartaBottomPara(s.list,currentTarget.card,currentTarget.number);
+    if(res.error){
+      tdBottom.innerHTML=`<span class="danger">${res.error}</span>`;
+    } else {
+      tdBottom.innerHTML=`<strong>${codeToDisplay(res.bottom)}</strong> <span class="muted small">(posición ${res.bottomIndex+1})</span>`;
+      tdNotes.innerHTML=`Target en posición ${res.targetIndex+1}. ${s.notes||""}`;
+    }
+    row.append(tdName,tdBottom,tdNotes);
+    resultsTableBody.appendChild(row);
+  });
+}
+
+/* eventos */
+btnGenerate.addEventListener("click",()=>{
+  const rn=randomCardAndNumber();
+  currentTarget=rn;
+  displayTarget(rn.card,rn.number);
+  computeAll();
+});
+
+btnAddStack.addEventListener("click",()=>{
+  const name=(newStackName.value||"Stack sin nombre").trim();
+  const raw=newStackList.value.trim();
+  if(!raw){
+    stackMessage.textContent="Introduce una lista de cartas.";
+    return;
+  }
+  let items=raw.split(/[\n, ,;]+/).map(s=>s.trim()).filter(Boolean);
+  const normalized=items.map(normalizeCode);
+  if(normalized.length!==52 || normalized.some(x=>!x)){
+    stackMessage.innerHTML=`<span class="danger">La lista debe contener 52 códigos válidos (p.ej. AP,2P,...)</span>`;
+    return;
+  }
+  stacks.push({name,list:normalized});
+  renderStacksCheckboxes();
+  stackMessage.textContent=`Stack "${name}" añadido.`;
+  newStackList.value=""; newStackName.value="";
+});
+
+btnClearCustom.addEventListener("click",()=>{
+  newStackList.value=""; newStackName.value=""; stackMessage.textContent="";
+});
+
+/* init */
+renderStacksCheckboxes();
+const first=randomCardAndNumber();
+currentTarget=first;
+displayTarget(first.card,first.number);
+computeAll();
+</script>
+</body>
+</html>
+
